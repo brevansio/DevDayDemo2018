@@ -25,18 +25,54 @@ class MyViewController : UIViewController {
     }
 }
 
-extension String {
+struct Emoji {
+    static let terminator = "\(UnicodeScalar(0x10FFFF)!)"
     static let emoticonSet =
         CharacterSet(charactersIn: UnicodeScalar(0x100000)!...UnicodeScalar(0x100100)!)
     static let decomojiSet =
         CharacterSet(charactersIn: UnicodeScalar(0x100100)!..<UnicodeScalar(0x10FFFF)!)
     static let sentinelSet = CharacterSet([UnicodeScalar(0x10FFFF)!])
-    static var emojiSet: CharacterSet = {
-        var set = String.decomojiSet
-        set.formUnion(String.emoticonSet)
+    static var oldEmojiSet: CharacterSet = {
+        var set = Emoji.decomojiSet
+        set.formUnion(Emoji.emoticonSet)
         return set
     }()
 
+    let productId: String
+    let sticonId: String
+    let version: Int
+
+    var start: UInt = UInt.max {
+        didSet {
+            guard start > 0 else {
+                end = UInt.max
+                return
+            }
+            end = start + UInt(copyText.utf16.count)
+        }
+    }
+    private(set) var end: UInt = UInt.max
+    let keyword: String
+
+    lazy var imageUrl: URL = {
+        return Bundle.main.url(forResource: "\(productId)-\(sticonId)",
+                               withExtension: "png")!
+    }()
+
+    var copyText: String {
+        return "(\(keyword))"
+    }
+
+    init(product: String, code: String, replacementText: String, versionNum: Int = 0) {
+        productId = product
+        sticonId = code
+        keyword = replacementText
+        version = versionNum
+    }
+}
+
+/*
+extension String {
     func showEmoji() -> NSAttributedString {
         guard let range = self.rangeOfCharacter(from: String.emojiSet) else {
             return NSMutableAttributedString(string: self)
@@ -63,6 +99,7 @@ extension String {
         return emojiString
     }
 }
+*/
 
 extension CGSize {
     static func *(lhs: CGSize, rhs: CGFloat) -> CGSize {
@@ -72,29 +109,11 @@ extension CGSize {
 }
 
 class EmojiAttachment: NSTextAttachment {
-    static let terminator = "\(UnicodeScalar(0x10FFFF)!)"
-    let packageId: Int
-    let version: Int
-    let emojiCode: Int
-    let keyword: String
+    private(set) var emoji: Emoji
 
-    var copyText: String {
-        return "(\(keyword))"
-    }
-
-    var formattedText: String {
-        let packageCode = 0x100000 + (packageId << 8) + version
-        return "\(UnicodeScalar(packageCode)!)\(UnicodeScalar(emojiCode)!)\(keyword)\(EmojiAttachment.terminator)"
-    }
-
-    init(package: Int, code: Int, replacement: String) {
-        packageId = (package & 0x00FF00) >> 8
-        version = package & 0x0000FF
-        emojiCode = code
-        keyword = replacement
-        let imageUrl = Bundle.main.url(forResource: "\(packageId)-\(emojiCode)",
-                                       withExtension: "png")!
-        let imageData = try! Data(contentsOf: imageUrl)
+    init(emoji metadata: Emoji) {
+        emoji = metadata
+        let imageData = try! Data(contentsOf: emoji.imageUrl)
         super.init(data: imageData,
                    ofType: "public.image")
     }
@@ -118,8 +137,31 @@ class EmojiAttachment: NSTextAttachment {
 
         return CGRect(origin: .zero, size: image.size * scalingFactor)
     }
+
+    func append(to string: NSAttributedString?) -> NSAttributedString {
+        let attachmentString = NSAttributedString(attachment: self)
+        guard let string = string else {
+            emoji.start = 0
+            return attachmentString
+        }
+        let mutableCopy = NSMutableAttributedString(attributedString: string)
+
+        var length = mutableCopy.string.utf16.count
+
+        mutableCopy.enumerateAttribute(.attachment, in: NSRange(0..<mutableCopy.length),
+                                       options: []) { (attachment, _, _) in
+                                        guard let attachment = attachment as? EmojiAttachment else {
+                                            return
+                                        }
+                                        length += attachment.emoji.copyText.utf16.count
+        }
+        emoji.start = UInt(length)
+        mutableCopy.append(attachmentString)
+        return mutableCopy
+    }
 }
 
+/*
 extension NSAttributedString {
     static let EmojiPasteboard = UIPasteboard.Name("emojiPasteboard")
     func copyToPasteboard() {
@@ -161,6 +203,7 @@ extension NSAttributedString {
         }
     }
 }
+*/
 
 // Present the view controller in the Live View window
 let myViewController = MyViewController()
@@ -168,12 +211,7 @@ PlaygroundPage.current.liveView = myViewController
 
 let attributedText = NSMutableAttributedString(string: "Hello Attributed-World")
 
-// Show an Emoticon
-let packageUnicode = UnicodeScalar(0x103D04)!
-let codeUnicode = UnicodeScalar(0x100103)!
-let emoticonString = "\(packageUnicode)\(codeUnicode)line logo\(EmojiAttachment.terminator)"
-attributedText.append(emoticonString.showEmoji())
-
-attributedText.copyToPasteboard()
-let copiedText = NSAttributedString.attributedStringFromClipboard()!
-myViewController.updateLabel(attributedText: copiedText)
+// Show a LINE Emoji
+let emoji = Emoji(product: "line", code: "logo", replacementText: "line")
+let attachment = EmojiAttachment(emoji: emoji)
+myViewController.updateLabel(attributedText: attachment.append(to: attributedText))
