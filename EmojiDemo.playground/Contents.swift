@@ -78,6 +78,10 @@ class EmojiAttachment: NSTextAttachment {
     let emojiCode: Int
     let keyword: String
 
+    var copyText: String {
+        return "(\(keyword))"
+    }
+
     init(package: Int, code: Int, replacement: String) {
         packageId = (package & 0x00FF00) >> 8
         version = package & 0x0000FF
@@ -111,6 +115,26 @@ class EmojiAttachment: NSTextAttachment {
     }
 }
 
+extension NSAttributedString {
+    func copyToPasteboard() {
+        var prettyString = self.string
+        enumerateAttributes(in: NSRange(0..<self.length),
+                            options: [.reverse]) { (attribute, range, _) in
+                                guard let attachment = attribute[.attachment] as? EmojiAttachment else {
+                                    return
+                                }
+                                var index = String.Index(encodedOffset: range.lowerBound)
+                                if index > prettyString.endIndex {
+                                    index = prettyString.endIndex
+                                }
+                                prettyString.insert(contentsOf: attachment.copyText,
+                                                    at: index)
+
+        }
+        UIPasteboard.general.string = prettyString
+    }
+}
+
 // Present the view controller in the Live View window
 let myViewController = MyViewController()
 PlaygroundPage.current.liveView = myViewController
@@ -122,4 +146,7 @@ let packageUnicode = UnicodeScalar(0x103D04)!
 let codeUnicode = UnicodeScalar(0x100103)!
 let emoticonString = "\(packageUnicode)\(codeUnicode)line logo\(EmojiAttachment.terminator)"
 attributedText.append(emoticonString.showEmoji())
-myViewController.updateLabel(attributedText: attributedText)
+
+attributedText.copyToPasteboard()
+let copiedText = NSAttributedString(string: UIPasteboard.general.string!)
+myViewController.updateLabel(attributedText: copiedText)
