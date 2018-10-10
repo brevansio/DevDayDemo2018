@@ -196,12 +196,11 @@ class EmojiAttachment: NSTextAttachment {
     }
 }
 
-/*
 extension NSAttributedString {
     static let EmojiPasteboard = UIPasteboard.Name("emojiPasteboard")
     func copyToPasteboard() {
         var prettyString = self.string
-        var internalString = self.string
+        var emojiList = [Emoji]()
         enumerateAttributes(in: NSRange(0..<self.length),
                             options: [.reverse]) { (attribute, range, _) in
                                 guard let attachment = attribute[.attachment] as? EmojiAttachment else {
@@ -211,34 +210,41 @@ extension NSAttributedString {
                                 if index > prettyString.endIndex {
                                     index = prettyString.endIndex
                                 }
-                                prettyString.insert(contentsOf: attachment.copyText,
+                                prettyString.insert(contentsOf: attachment.emoji.copyText,
                                                     at: index)
-                                internalString.insert(contentsOf: attachment.formattedText,
-                                                      at: index)
-
+                                emojiList.append(attachment.emoji)
         }
         UIPasteboard.general.string = prettyString
-        let emojiPasteboard = UIPasteboard(name: NSAttributedString.EmojiPasteboard,
-                                           create: true)
-        emojiPasteboard?.string = internalString
+
+        if !emojiList.isEmpty {
+            let emojiPasteboard = UIPasteboard(name: NSAttributedString.EmojiPasteboard,
+                                               create: true)
+            let emojiData = try! JSONEncoder().encode(emojiList)
+            emojiPasteboard?.setData(emojiData, forPasteboardType: "public.string")
+        }
     }
 
     static func attributedStringFromClipboard() -> NSAttributedString? {
+
+        guard let generalString = UIPasteboard.general.string else {
+            return nil
+        }
+
         let emojiPasteboard =
             UIPasteboard(name: NSAttributedString.EmojiPasteboard,
                          create: false)
-        if let internalString = emojiPasteboard?.string {
-            return internalString.showEmoji()
-        }
-        else if let generalString = UIPasteboard.general.string {
-            return NSAttributedString(string: generalString)
+        let emojiList: [Emoji]
+        if let emojiData = emojiPasteboard?.data(forPasteboardType: "public.string"),
+        let emojiDictionaries = (try? JSONSerialization.jsonObject(with: emojiData, options: [])) as? [[String: Any]] {
+            emojiList = emojiDictionaries.compactMap { Emoji(from: $0, attachedTo: generalString) }
         }
         else {
-            return nil
+            emojiList = []
         }
+
+        return generalString.show(emoji: emojiList)
     }
 }
-*/
 
 // Present the view controller in the Live View window
 let myViewController = MyViewController()
@@ -251,5 +257,9 @@ let attributedText = NSMutableAttributedString(string: "Hello Attributed-World")
 let recievedString = "Hello Attributed-World(line logo)"
 let decodedEmojiData = [["S": 22, "E": 33, "productId": "line", "sticonId": "logo", "version": 8]]
 let recievedEmoji = decodedEmojiData.compactMap { Emoji(from: $0, attachedTo: recievedString) }
-let emojiText = recievedString.show(emoji: recievedEmoji)
-myViewController.updateLabel(attributedText: emojiText)
+
+
+let emoji = Emoji(product: "line", code: "logo", replacementText: "line logo")
+let attachment = EmojiAttachment(emoji: emoji)
+attachment.append(to: attributedText).copyToPasteboard()
+myViewController.updateLabel(attributedText: NSAttributedString.attributedStringFromClipboard()!)
