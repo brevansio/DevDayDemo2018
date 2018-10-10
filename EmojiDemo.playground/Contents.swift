@@ -82,6 +82,11 @@ class EmojiAttachment: NSTextAttachment {
         return "(\(keyword))"
     }
 
+    var formattedText: String {
+        let packageCode = 0x100000 + (packageId << 8) + version
+        return "\(UnicodeScalar(packageCode)!)\(UnicodeScalar(emojiCode)!)\(keyword)\(EmojiAttachment.terminator)"
+    }
+
     init(package: Int, code: Int, replacement: String) {
         packageId = (package & 0x00FF00) >> 8
         version = package & 0x0000FF
@@ -116,8 +121,10 @@ class EmojiAttachment: NSTextAttachment {
 }
 
 extension NSAttributedString {
+    static let EmojiPasteboard = UIPasteboard.Name("emojiPasteboard")
     func copyToPasteboard() {
         var prettyString = self.string
+        var internalString = self.string
         enumerateAttributes(in: NSRange(0..<self.length),
                             options: [.reverse]) { (attribute, range, _) in
                                 guard let attachment = attribute[.attachment] as? EmojiAttachment else {
@@ -129,9 +136,29 @@ extension NSAttributedString {
                                 }
                                 prettyString.insert(contentsOf: attachment.copyText,
                                                     at: index)
+                                internalString.insert(contentsOf: attachment.formattedText,
+                                                      at: index)
 
         }
         UIPasteboard.general.string = prettyString
+        let emojiPasteboard = UIPasteboard(name: NSAttributedString.EmojiPasteboard,
+                                           create: true)
+        emojiPasteboard?.string = internalString
+    }
+
+    static func attributedStringFromClipboard() -> NSAttributedString? {
+        let emojiPasteboard =
+            UIPasteboard(name: NSAttributedString.EmojiPasteboard,
+                         create: false)
+        if let internalString = emojiPasteboard?.string {
+            return internalString.showEmoji()
+        }
+        else if let generalString = UIPasteboard.general.string {
+            return NSAttributedString(string: generalString)
+        }
+        else {
+            return nil
+        }
     }
 }
 
@@ -148,5 +175,5 @@ let emoticonString = "\(packageUnicode)\(codeUnicode)line logo\(EmojiAttachment.
 attributedText.append(emoticonString.showEmoji())
 
 attributedText.copyToPasteboard()
-let copiedText = NSAttributedString(string: UIPasteboard.general.string!)
+let copiedText = NSAttributedString.attributedStringFromClipboard()!
 myViewController.updateLabel(attributedText: copiedText)
