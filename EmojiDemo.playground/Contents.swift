@@ -25,7 +25,7 @@ class MyViewController : UIViewController {
     }
 }
 
-struct Emoji {
+struct Emoji: Encodable {
     static let terminator = "\(UnicodeScalar(0x10FFFF)!)"
     static let emoticonSet =
         CharacterSet(charactersIn: UnicodeScalar(0x100000)!...UnicodeScalar(0x100100)!)
@@ -69,12 +69,47 @@ struct Emoji {
         keyword = replacementText
         version = versionNum
     }
+
+    enum CodingKeys: String, CodingKey {
+        case productId, sticonId, version
+        case start = "S"
+        case end = "E"
+    }
+
+    init?(from dictionary: [String: Any], attachedTo string: String) {
+        guard let productValue = dictionary[CodingKeys.productId.rawValue] as? String,
+            let sticonValue = dictionary[CodingKeys.sticonId.rawValue] as? String,
+            let versionNum = dictionary[CodingKeys.version.rawValue] as? Int,
+            let startValue = dictionary[CodingKeys.start.rawValue] as? Int,
+            let endValue = dictionary[CodingKeys.end.rawValue] as? Int else {
+                return nil
+        }
+
+        let startIndex = String.Index(encodedOffset: startValue)
+        let endIndex = String.Index(encodedOffset: endValue)
+        let keyword = String(string[startIndex..<endIndex])
+                            .trimmingCharacters(in: CharacterSet(["(", ")"]))
+        self.init(product: productValue, code: sticonValue, replacementText: keyword, versionNum: versionNum)
+        start = UInt(startValue)
+        end = UInt(endValue)
+    }
 }
 
-/*
 extension String {
+    func show(emoji emojiList: [Emoji]) -> NSAttributedString {
+        let attributedString = NSMutableAttributedString(string: self)
+        for emoji in emojiList.sorted(by: { $0.start > $1.start }) {
+            let attachment = EmojiAttachment.init(emoji: emoji)
+            attributedString.replaceCharacters(in: NSRange(emoji.start..<emoji.end),
+                                               with: NSAttributedString(attachment: attachment))
+        }
+        return attributedString
+    }
+
+
+    /*
     func showEmoji() -> NSAttributedString {
-        guard let range = self.rangeOfCharacter(from: String.emojiSet) else {
+        guard let range = self.rangeOfCharacter(from: Emoji.emojiSet) else {
             return NSMutableAttributedString(string: self)
         }
 
@@ -82,8 +117,8 @@ extension String {
             NSMutableAttributedString(string:String(self[startIndex..<range.lowerBound]))
 
         let packageId: UInt32 = self[range].unicodeScalars.first!.value
-        let emojiRange = self[range.upperBound..<endIndex].rangeOfCharacter(from: String.emojiSet)!
-        let sentinelRange = self[emojiRange.upperBound..<endIndex].rangeOfCharacter(from: String.sentinelSet)!
+        let emojiRange = self[range.upperBound..<endIndex].rangeOfCharacter(from: Emoji.emojiSet)!
+        let sentinelRange = self[emojiRange.upperBound..<endIndex].rangeOfCharacter(from: Emoji.sentinelSet)!
         let emojiCode: UInt32 = self[emojiRange].unicodeScalars.first!.value
         let keyword = String(self[emojiRange.upperBound..<sentinelRange.lowerBound])
         let attachment = EmojiAttachment(package: Int(packageId),
@@ -98,8 +133,8 @@ extension String {
 
         return emojiString
     }
+    */
 }
-*/
 
 extension CGSize {
     static func *(lhs: CGSize, rhs: CGFloat) -> CGSize {
@@ -212,6 +247,9 @@ PlaygroundPage.current.liveView = myViewController
 let attributedText = NSMutableAttributedString(string: "Hello Attributed-World")
 
 // Show a LINE Emoji
-let emoji = Emoji(product: "line", code: "logo", replacementText: "line")
-let attachment = EmojiAttachment(emoji: emoji)
-myViewController.updateLabel(attributedText: attachment.append(to: attributedText))
+
+let recievedString = "Hello Attributed-World(line logo)"
+let decodedEmojiData = [["S": 22, "E": 33, "productId": "line", "sticonId": "logo", "version": 8]]
+let recievedEmoji = decodedEmojiData.compactMap { Emoji(from: $0, attachedTo: recievedString) }
+let emojiText = recievedString.show(emoji: recievedEmoji)
+myViewController.updateLabel(attributedText: emojiText)
