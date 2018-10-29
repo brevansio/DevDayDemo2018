@@ -48,19 +48,44 @@ struct Emoji: Encodable {
                 end = UInt.max
                 return
             }
-            end = start + UInt(copyText.utf16.count)
+            end = start + UInt(formattedText.utf16.count)
         }
     }
-    private(set) var end: UInt = UInt.max
+    var end: UInt = UInt.max
     let keyword: String
 
     lazy var imageUrl: URL = {
-        return Bundle.main.url(forResource: "\(productId)-\(sticonId)",
+        var resourceName: String
+        if productId == "1" {
+            resourceName = "\(sticonId)"
+        }
+        else {
+            resourceName = "\(productId)-\(sticonId)"
+        }
+        return Bundle.main.url(forResource: resourceName,
                                withExtension: "png")!
     }()
 
     var copyText: String {
         return "(\(keyword))"
+    }
+
+    var formattedText: String {
+        guard let packageId = Int(productId),
+            let emojiCode = Int(sticonId) else {
+            return copyText
+        }
+        if packageId == 1 {
+            return "\(UnicodeScalar(emojiCode)!)"
+        }
+        if let productScalar = UnicodeScalar(packageId),
+            Emoji.oldEmojiSet.contains(productScalar),
+            let emojiScalar = UnicodeScalar(emojiCode) {
+            return "\(productScalar)\(emojiScalar)\(keyword)\(Emoji.terminator)"
+        }
+        else {
+            return copyText
+        }
     }
 
     init(product: String, code: String, replacementText: String, versionNum: Int = 0) {
@@ -93,6 +118,14 @@ struct Emoji: Encodable {
         start = UInt(startValue)
         end = UInt(endValue)
     }
+
+    init(emoticon: Int) {
+        productId = "1"
+        sticonId = String(emoticon)
+        keyword = ""
+        version = 0
+        imageUrl = Bundle.main.url(forResource: "\(emoticon)", withExtension: "png")!
+    }
 }
 
 extension String {
@@ -106,34 +139,45 @@ extension String {
         return attributedString
     }
 
-
-    /*
     func showEmoji() -> NSAttributedString {
-        guard let range = self.rangeOfCharacter(from: Emoji.emojiSet) else {
+        guard let range = self.rangeOfCharacter(from: Emoji.oldEmojiSet) else {
             return NSMutableAttributedString(string: self)
         }
 
         let emojiString =
             NSMutableAttributedString(string:String(self[startIndex..<range.lowerBound]))
 
-        let packageId: UInt32 = self[range].unicodeScalars.first!.value
-        let emojiRange = self[range.upperBound..<endIndex].rangeOfCharacter(from: Emoji.emojiSet)!
-        let sentinelRange = self[emojiRange.upperBound..<endIndex].rangeOfCharacter(from: Emoji.sentinelSet)!
-        let emojiCode: UInt32 = self[emojiRange].unicodeScalars.first!.value
-        let keyword = String(self[emojiRange.upperBound..<sentinelRange.lowerBound])
-        let attachment = EmojiAttachment(package: Int(packageId),
-                                         code: Int(emojiCode),
-                                         replacement: keyword)
-        emojiString.append(NSAttributedString(attachment: attachment))
+        let packageId = self[range].unicodeScalars.first!.value
+        if Emoji.emoticonSet.contains(UnicodeScalar(packageId)!) {
+            let emoji = Emoji(emoticon: Int(packageId))
+            let attachment = EmojiAttachment(emoji: emoji)
 
-        if sentinelRange.upperBound < self.endIndex {
-            let substring = String(self[sentinelRange.upperBound..<self.endIndex])
+            emojiString.append(NSAttributedString(attachment: attachment))
+
+            let substring = String(self[range.upperBound..<self.endIndex])
             emojiString.append(substring.showEmoji())
+        }
+        else if let emojiRange = self[range.upperBound..<endIndex].rangeOfCharacter(from: Emoji.oldEmojiSet),
+            let sentinelRange = self[emojiRange.upperBound..<endIndex].rangeOfCharacter(from: Emoji.sentinelSet) {
+            let productId = String((packageId & 0x00FF00) >> 8)
+            let version = Int(packageId & 0x0000FF)
+            let emojiCode = String(self[emojiRange].unicodeScalars.first!.value)
+            let keyword = String(self[emojiRange.upperBound..<sentinelRange.lowerBound])
+            let emoji = Emoji(product: productId,
+                              code: emojiCode,
+                              replacementText: keyword,
+                              versionNum: version)
+            let attachment = EmojiAttachment(emoji: emoji)
+            emojiString.append(NSAttributedString(attachment: attachment))
+
+            if sentinelRange.upperBound < self.endIndex {
+                let substring = String(self[sentinelRange.upperBound..<self.endIndex])
+                emojiString.append(substring.showEmoji())
+            }
         }
 
         return emojiString
     }
-    */
 }
 
 extension CGSize {
@@ -199,26 +243,27 @@ class EmojiAttachment: NSTextAttachment {
 extension NSAttributedString {
     static let EmojiPasteboard = UIPasteboard.Name("emojiPasteboard")
     func copyToPasteboard() {
-        var prettyString = self.string
+        let mutableSelf = NSMutableAttributedString(attributedString: self)
         var emojiList = [Emoji]()
-        enumerateAttributes(in: NSRange(0..<self.length),
-                            options: [.reverse]) { (attribute, range, _) in
+        mutableSelf.enumerateAttributes(in: NSRange(0..<self.length),
+                                        options: []) { (attribute, range, _) in
                                 guard let attachment = attribute[.attachment] as? EmojiAttachment else {
                                     return
                                 }
-                                var index = String.Index(encodedOffset: range.lowerBound)
-                                if index > prettyString.endIndex {
-                                    index = prettyString.endIndex
-                                }
-                                prettyString.insert(contentsOf: attachment.emoji.copyText,
-                                                    at: index)
-                                emojiList.append(attachment.emoji)
+                                mutableSelf.insert(NSAttributedString(string: attachment.emoji.copyText),
+                                                   at: range.lowerBound)
+                                var emoji = attachment.emoji
+                                emoji.start = UInt(range.lowerBound)
+                                emoji.end = emoji.start + UInt(emoji.copyText.utf16.count)
+
+                                emojiList.append(emoji)
         }
-        UIPasteboard.general.string = prettyString
+        UIPasteboard.general.string = mutableSelf.string
 
         if !emojiList.isEmpty {
             let emojiPasteboard = UIPasteboard(name: NSAttributedString.EmojiPasteboard,
                                                create: true)
+            print(emojiList)
             let emojiData = try! JSONEncoder().encode(emojiList)
             emojiPasteboard?.setData(emojiData, forPasteboardType: "public.string")
         }
@@ -250,16 +295,31 @@ extension NSAttributedString {
 let myViewController = MyViewController()
 PlaygroundPage.current.liveView = myViewController
 
-let attributedText = NSMutableAttributedString(string: "Hello Attributed-World")
+let attributedText = NSMutableAttributedString(string: "Hello Emoji-World")
 
-// Show a LINE Emoji
+let emoticonUnicode = UnicodeScalar(0x100078)!
+let emoticonString = "\(emoticonUnicode)"
 
-let recievedString = "Hello Attributed-World(line logo)"
-let decodedEmojiData = [["S": 22, "E": 33, "productId": "line", "sticonId": "logo", "version": 8]]
+let packageUnicode = UnicodeScalar(0x103D04)!
+let codeUnicode = UnicodeScalar(0x100103)!
+let decoMojiString = "\(packageUnicode)\(codeUnicode)line logo\(Emoji.terminator)"
+
+let oldEmojiString = emoticonString + decoMojiString
+
+attributedText.append(oldEmojiString.showEmoji())
+
+let recievedString = "(line logo)"
+let decodedEmojiData = [["S": 0, "E": 11, "productId": "line", "sticonId": "logo", "version": 8]]
 let recievedEmoji = decodedEmojiData.compactMap { Emoji(from: $0, attachedTo: recievedString) }
+let emojiText = recievedString.show(emoji: recievedEmoji)
 
+attributedText.append(emojiText)
 
-let emoji = Emoji(product: "line", code: "logo", replacementText: "line logo")
-let attachment = EmojiAttachment(emoji: emoji)
-attachment.append(to: attributedText).copyToPasteboard()
+myViewController.updateLabel(attributedText: attributedText)
+
+attributedText.copyToPasteboard()
+
+//let pasteboardString = NSAttributedString(string: UIPasteboard.general.string!)
+//myViewController.updateLabel(attributedText: pasteboardString)
+
 myViewController.updateLabel(attributedText: NSAttributedString.attributedStringFromClipboard()!)
